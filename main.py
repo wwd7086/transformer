@@ -5,9 +5,10 @@ import torch
 def main():
     print("Hello from transformer!")
 
-    transformer = Transformer(feature_dim=8, num_heads=2)
+    B, T, C = 2, 8, 16
 
-    B, T, C = 2, 8, 8
+    transformer = Transformer(feature_dim=C, num_heads=2, context_length=T)
+
     test_input = torch.zeros(B, T, C)
 
     test_output = transformer(test_input)

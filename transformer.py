@@ -41,6 +41,7 @@ class MultiHeadAttention(nn.Module):
         self,
         feature_dim: int,
         num_heads: int,
+        context_length: int,
     ) -> None:
         super().__init__()
 
@@ -48,7 +49,13 @@ class MultiHeadAttention(nn.Module):
 
         self.num_heads = num_heads
         self.head_size = feature_dim // self.num_heads
-        self.normalization_factor = math.sqrt(self.head_size)
+        self.normalization_factor = 1.0 / math.sqrt(self.head_size)
+
+        causal_mask = torch.triu(
+            torch.ones(context_length, context_length, dtype=torch.bool),
+            diagonal=1,
+        )
+        self.register_buffer("causal_mask", causal_mask)
 
         self.attention_proj = nn.Linear(
             feature_dim,
@@ -74,26 +81,27 @@ class MultiHeadAttention(nn.Module):
         B, T, C = input.shape
 
         # Apply projection to get q,k,v.
-        qkv = self.attention_proj(input)  # (B, T, 3*C)
-        qkv = qkv.view(B, T, self.num_heads, -1)  # (B, T, H, 3*C/H)
-        q: torch.Tensor = qkv[..., : self.head_size]  # (B, T, H, C/H)
-        k: torch.Tensor = qkv[..., self.head_size : 2 * self.head_size]
-        v: torch.Tensor = qkv[..., 2 * self.head_size :]
+        qkv: torch.Tensor = self.attention_proj(input)  # (B, T, 3*C)
+        qkv = qkv.reshape(B, T, 3, self.num_heads, self.head_size)  # (B, T, 3, H, Dh)
+        qkv = qkv.transpose(1, 3)  # (B, H, 3, T, Dh)
+        q, k, v = qkv.unbind(dim=2)  # (B, H, T, Dh)
 
-        # TODO: Add causal attention mask
         # TODO: Support rotary embedding
         # TODO: Support group query
 
         # Apply multi head attention.
-        q = q.permute(0, 2, 1, 3)  # (B, H, T, C/H)
-        k_t = k.permute(0, 2, 3, 1)  # (B, H, C/H, T)
-        att = q @ k_t / self.normalization_factor  # (B, H, T, T)
+        k_t = k.transpose(2, 3)  # (B, H, Dh, T)
+        att = q @ k_t * self.normalization_factor  # (B, H, T, T)
+        # Apply causal mask
+        att = att.masked_fill(
+            self.causal_mask[:T, :T],
+            float("-inf"),
+        )
         att_prob = F.softmax(att, dim=-1)  # (B, H, T, T)
-        v = v.permute(0, 2, 1, 3)  # (B, H, T, C/H)
-        att_v: torch.Tensor = att_prob @ v  # (B, H, T, C/H)
+        att_v: torch.Tensor = att_prob @ v  # (B, H, T, Dh)
 
         # Apply final concat and projection.
-        att_v = att_v.permute(0, 2, 1, 3)  # (B, T, H, C/H)
+        att_v = att_v.transpose(1, 2)  # (B, T, H, Dh)
         att_v = att_v.flatten(start_dim=2, end_dim=3)  # (B, T, C)
         output = self.final_proj(att_v)
 
@@ -107,19 +115,17 @@ class SwiGLU(nn.Module):
         self.linear = nn.Linear(feature_dim, 2 * out_dim, bias=False)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = self.linear(input)
-        swi_out = out[..., : self.out_dim]
-        gate_out = out[..., self.out_dim :]
-        return swi_out * F.sigmoid(swi_out) * gate_out
+        swi_out, gate_out = self.linear(input).split(self.out_dim, dim=-1)
+        return swi_out * torch.sigmoid(swi_out) * gate_out
 
 
 class FeedForward(nn.Module):
 
     def __init__(self, feature_dim: int) -> None:
         super().__init__()
-
-        self.ff_1 = SwiGLU(feature_dim, 4 * feature_dim)
-        self.ff_2 = nn.Linear(4 * feature_dim, feature_dim, bias=False)
+        hidden_dim = int(8 * feature_dim / 3)
+        self.ff_1 = SwiGLU(feature_dim, hidden_dim)
+        self.ff_2 = nn.Linear(hidden_dim, feature_dim, bias=False)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         """Run forward
@@ -131,7 +137,6 @@ class FeedForward(nn.Module):
             Output with shape (B, T, C)
         """
         out = self.ff_1(input)
-        out = F.relu(out)
         out = self.ff_2(out)
 
         return out
@@ -143,10 +148,15 @@ class Transformer(nn.Module):
         self,
         feature_dim: int,
         num_heads: int,
+        context_length: int,
     ):
         super().__init__()
 
-        self.attention = MultiHeadAttention(feature_dim, num_heads)
+        self.attention = MultiHeadAttention(
+            feature_dim,
+            num_heads,
+            context_length,
+        )
         self.feed_forward = FeedForward(feature_dim)
         self.att_norm = RMSNorm(feature_dim)
         self.ff_norm = RMSNorm(feature_dim)
