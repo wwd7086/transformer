@@ -88,6 +88,7 @@ class MultiHeadAttention(nn.Module):
 
         # TODO: Support rotary embedding
         # TODO: Support group query
+        # TODO: Try out flash attention
 
         # Apply multi head attention.
         k_t = k.transpose(2, 3)  # (B, H, Dh, T)
@@ -178,3 +179,11 @@ class Transformer(nn.Module):
         ff_out += att_out
 
         return ff_out
+
+
+# Next step:
+# 1. Create the full nano GPT
+# 2. Train on the tiny sharkspear dataset
+# 3. Run inference with KV cache
+# 4. Check out TODOs and other improvements
+# 5. list common set of mistakes and bugs
