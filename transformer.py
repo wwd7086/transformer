@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+import pos_emb
+
 # Convention for tensor dimensions.
 # B - Batch
 # T - Context length
@@ -51,11 +53,19 @@ class MultiHeadAttention(nn.Module):
         self.head_size = feature_dim // self.num_heads
         self.normalization_factor = 1.0 / math.sqrt(self.head_size)
 
+        # Attention mask.
         causal_mask = torch.triu(
             torch.ones(context_length, context_length, dtype=torch.bool),
             diagonal=1,
         )
         self.register_buffer("causal_mask", causal_mask)
+
+        # Rotary embedding.
+        rot_thetas = pos_emb.gen_thetas(self.head_size // 2)
+        rot_sin = pos_emb.gen_sin_emb(rot_thetas, context_length)
+        rot_cos = pos_emb.gen_cos_emb(rot_thetas, context_length)
+        self.register_buffer("rot_sin", rot_sin)
+        self.register_buffer("rot_cos", rot_cos)
 
         self.attention_proj = nn.Linear(
             feature_dim,
@@ -86,9 +96,9 @@ class MultiHeadAttention(nn.Module):
         qkv = qkv.transpose(1, 3)  # (B, H, 3, T, Dh)
         q, k, v = qkv.unbind(dim=2)  # (B, H, T, Dh)
 
-        # TODO: Support rotary embedding
-        # TODO: Support group query
-        # TODO: Try out flash attention
+        # Apply rotary embedding to q, k.
+        q = pos_emb.apply_rot_emb(q, self.rot_sin, self.rot_cos)
+        k = pos_emb.apply_rot_emb(k, self.rot_sin, self.rot_cos)
 
         # Apply multi head attention.
         k_t = k.transpose(2, 3)  # (B, H, Dh, T)
@@ -181,9 +191,24 @@ class Transformer(nn.Module):
         return ff_out
 
 
+# TODO: Support group query
+# TODO: Try out flash attention
+
 # Next step:
 # 1. Create the full nano GPT
 # 2. Train on the tiny sharkspear dataset
 # 3. Run inference with KV cache
-# 4. Check out TODOs and other improvements
 # 5. list common set of mistakes and bugs
+#  - transpose, view, contigous
+# 6. Right some proper tests that could prob the implementations
+
+if __name__ == "__main__":
+    B, T, C = 2, 8, 16
+
+    transformer = Transformer(feature_dim=C, num_heads=2, context_length=T)
+
+    test_input = torch.zeros(B, T, C)
+    test_output = transformer(test_input)
+
+    assert test_output.shape == test_input.shape
+    print(test_output.shape)
