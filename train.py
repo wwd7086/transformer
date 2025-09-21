@@ -37,13 +37,14 @@ weight_decay = 1e-2
 print_interval = 50
 save_interval = 500
 eval_interval = 500
+eval_iters = 200
 
 gpt_config = gpt.TinyGPTConfig(
-    emb_dim=128,
-    num_layers=4,
-    num_heads=4,
+    emb_dim=192,
+    num_layers=6,
+    num_heads=6,
     vocab_size=vocab_size,
-    context_length=64,
+    context_length=128,
 )
 
 # Initialize the model.
@@ -65,6 +66,27 @@ def get_lr(it: int) -> float:
     return min_lr + coeff * (learning_rate - min_lr)
 
 
+@torch.no_grad()
+def estimate_loss() -> dict:
+    out = {}
+    gpt_model.eval()
+    for split in ["train", "val"]:
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            x, y = data.get_batch(
+                data_dir,
+                split,
+                gpt_config.context_length,
+                batch_size,
+            )
+            y_pred = gpt_model(x)
+            cls_loss = loss.token_classification_loss(y_pred, y)
+            losses[k] = cls_loss.item()
+        out[split] = losses.mean()
+    gpt_model.train()
+    return out
+
+
 # Intialize the optimizer.
 optimizer = gpt_model.configure_optimizers(
     weight_decay,
@@ -74,7 +96,6 @@ optimizer = gpt_model.configure_optimizers(
 
 # Figure out network intialization
 # Model summary logging
-# Model validation loss
 
 
 def train_loop():
@@ -122,7 +143,10 @@ def train_loop():
             print(f"Step: {iter}, saved ckpt")
 
         if iter % eval_interval == 0 or iter == max_iters - 1:
-            pass
+            losses = estimate_loss()
+            print(
+                f"Step: {iter}, train loss {losses["train"]:.4f}, val loss {losses["val"]:.4f}"
+            )
 
 
 if __name__ == "__main__":
