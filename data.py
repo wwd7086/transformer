@@ -44,3 +44,13 @@ def get_vocab_size(meta_path: str) -> Optional[int]:
         meta_vocab_size = meta["vocab_size"]
         print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
     return meta_vocab_size
+
+
+def get_token_enc_dec(meta_path: str):
+    with open(meta_path, "rb") as f:
+        meta = pickle.load(f)
+    # TODO want to make this more general to arbitrary encoder/decoder schemes
+    stoi, itos = meta["stoi"], meta["itos"]
+    encode = lambda s: [stoi[c] for c in s]
+    decode = lambda l: "".join([itos[i] for i in l])
+    return encode, decode

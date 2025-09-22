@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -45,11 +47,16 @@ class MultiHeadAttention(nn.Module):
         num_heads: int,
         context_length: int,
     ) -> None:
+        """
+        Args:
+            context_length: The max context length.
+        """
         super().__init__()
 
         assert feature_dim % num_heads == 0
 
         self.num_heads = num_heads
+        self.context_length = context_length
         self.head_size = feature_dim // self.num_heads
         self.normalization_factor = 1.0 / math.sqrt(self.head_size)
 
@@ -67,6 +74,11 @@ class MultiHeadAttention(nn.Module):
         self.register_buffer("rot_sin", rot_sin)
         self.register_buffer("rot_cos", rot_cos)
 
+        # KV caches.
+        self.k_cache: Optional[torch.Tensor] = None  # (B, H, Tc, Dh)
+        self.v_cache: Optional[torch.Tensor] = None  # (B, H, Tc, Dh)
+
+        # MLP layers.
         self.attention_proj = nn.Linear(
             feature_dim,
             feature_dim * 3,
@@ -79,7 +91,11 @@ class MultiHeadAttention(nn.Module):
             bias=True,
         )
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input: torch.Tensor,
+        use_kv_cache: bool = False,
+    ) -> torch.Tensor:
         """Run forward
 
         Args:
@@ -87,6 +103,9 @@ class MultiHeadAttention(nn.Module):
 
         Returns:
             Output with shape (B, T, C)
+
+        Note:
+            T should be equal or smaller than the context length.
         """
         B, T, C = input.shape
 
@@ -96,19 +115,46 @@ class MultiHeadAttention(nn.Module):
         qkv = qkv.transpose(1, 3)  # (B, H, 3, T, Dh)
         q, k, v = qkv.unbind(dim=2)  # (B, H, T, Dh)
 
+        if use_kv_cache:
+            if self.k_cache is None:
+                # Initialize the cache.
+                self.k_cache = k
+                self.v_cache = v
+            else:
+                # Ensure the batch dimension matches.
+                assert self.v_cache is not None
+                assert B == self.k_cache.shape[0]
+                # Append to the cache.
+                self.k_cache = torch.concat((self.k_cache, k), dim=2)
+                self.k_cache = self.k_cache[..., -self.context_length :, :]
+                self.v_cache = torch.concat((self.v_cache, v), dim=2)
+                self.v_cache = self.v_cache[..., -self.context_length :, :]
+                k = self.k_cache
+                v = self.v_cache
+
+        # Note:
+        # - T: Is the number of new query keys
+        # - Tc: Is the number of cached keys
+        # - Tk: Is the total number of keys
+        Tk = k.shape[2]
+        assert Tk <= self.context_length
+        Tc = Tk - T
+
         # Apply rotary embedding to q, k.
-        q = pos_emb.apply_rot_emb(q, self.rot_sin, self.rot_cos)
-        k = pos_emb.apply_rot_emb(k, self.rot_sin, self.rot_cos)
+        q = pos_emb.apply_rot_emb(
+            q, self.rot_sin[Tc : Tc + T, :], self.rot_cos[Tc : Tc + T, :]
+        )
+        k = pos_emb.apply_rot_emb(k, self.rot_sin[:Tk, :], self.rot_cos[:Tk, :])
 
         # Apply multi head attention.
-        k_t = k.transpose(2, 3)  # (B, H, Dh, T)
-        att = q @ k_t * self.normalization_factor  # (B, H, T, T)
+        k_t = k.transpose(2, 3)  # (B, H, Dh, Tk)
+        att = q @ k_t * self.normalization_factor  # (B, H, T, Tk)
         # Apply causal mask
         att = att.masked_fill(
-            self.causal_mask[:T, :T],
+            self.causal_mask[Tc : Tc + T, :Tk],
             float("-inf"),
         )
-        att_prob = F.softmax(att, dim=-1)  # (B, H, T, T)
+        att_prob = F.softmax(att, dim=-1)  # (B, H, T, Tk)
         att_v: torch.Tensor = att_prob @ v  # (B, H, T, Dh)
 
         # Apply final concat and projection.
@@ -117,6 +163,11 @@ class MultiHeadAttention(nn.Module):
         output = self.final_proj(att_v)
 
         return output
+
+    def clear_cache(self) -> None:
+        """Clear the kv cache."""
+        self.k_cache = None
+        self.v_cache = None
 
 
 class SwiGLU(nn.Module):
@@ -172,7 +223,11 @@ class Transformer(nn.Module):
         self.att_norm = RMSNorm(feature_dim)
         self.ff_norm = RMSNorm(feature_dim)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input: torch.Tensor,
+        use_kv_cache: bool = False,
+    ) -> torch.Tensor:
         """Run forward
 
         Args:
@@ -182,7 +237,10 @@ class Transformer(nn.Module):
             Output with shape (B, T, C)
         """
 
-        att_out = self.attention(self.att_norm(input))
+        att_out = self.attention(
+            self.att_norm(input),
+            use_kv_cache,
+        )
         att_out += input
 
         ff_out = self.feed_forward(self.ff_norm(att_out))
@@ -190,25 +248,32 @@ class Transformer(nn.Module):
 
         return ff_out
 
+    def clear_cache(self) -> None:
+        self.attention.clear_cache()
+
 
 # TODO: Support group query
 # TODO: Try out flash attention
 
-# Next step:
-# 1. Create the full nano GPT
-# 2. Train on the tiny sharkspear dataset
-# 3. Run inference with KV cache
-# 5. list common set of mistakes and bugs
-#  - transpose, view, contigous
-# 6. Right some proper tests that could prob the implementations
-
 if __name__ == "__main__":
     B, T, C = 2, 8, 16
 
-    transformer = Transformer(feature_dim=C, num_heads=2, context_length=T)
+    transformer = Transformer(feature_dim=C, num_heads=2, context_length=2 * T)
 
+    # Test simple forward.
     test_input = torch.zeros(B, T, C)
     test_output = transformer(test_input)
-
-    assert test_output.shape == test_input.shape
     print(test_output.shape)
+    assert test_output.shape == test_input.shape
+
+    # Test forward with cache.
+    test_output = transformer(test_input, use_kv_cache=True)
+    test_input2 = torch.zeros(B, 1, C)
+    test_output2 = transformer(test_input2, use_kv_cache=True)
+    print(test_output2.shape)
+    assert test_output2.shape == test_input2.shape
+
+    transformer.clear_cache()
+    test_output2 = transformer(test_input2, use_kv_cache=True)
+    print(test_output2.shape)
+    assert test_output2.shape == test_input2.shape

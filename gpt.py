@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import transformer
 from token_emb import TokenEmbedder
@@ -41,10 +42,14 @@ class TinyGPT(nn.Module):
 
         self.final_norm = transformer.RMSNorm(self.config.emb_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        use_kv_cache: bool = False,
+    ) -> torch.Tensor:
         """
         Args:
-            x: with shape [B, T]
+            x: with shape [B, T], dtype int64
 
         Returns:
             with shape [B, T, vocab_size]
@@ -55,13 +60,55 @@ class TinyGPT(nn.Module):
 
         # Apply multiple layers of transformer
         for transformer_layer in self.transformer_layers:
-            x_emb = transformer_layer(x_emb)
+            x_emb = transformer_layer(x_emb, use_kv_cache)
 
         # Decode the ouput
         x_emb = self.final_norm(x_emb)
         x_logits = self.embedder.decode(x_emb)
 
         return x_logits
+
+    @torch.no_grad()
+    def sample(
+        self,
+        prompt: torch.Tensor,
+        max_step: int,
+        temperature: float = 1.0,
+    ) -> torch.Tensor:
+        """Sample the output sequence autoregressivly based on the prompt.
+
+        Args:
+            prompt: with shape [B, Tp], dtype int64
+
+        Returns:
+            with shape [B, Ta], dtype int 64
+        """
+        self.eval()
+
+        # TODD: Support temperature based sampling to replace argmax.
+        all_out_idx = []
+
+        # Prefill the prompt.
+        out_logits = self.forward(prompt, use_kv_cache=True)[:, -1, ...]
+        out_logits /= temperature
+        out_prob = F.softmax(out_logits, dim=-1)  # (B, V)
+        last_out_idx = torch.multinomial(out_prob, num_samples=1)
+        all_out_idx.append(last_out_idx)
+
+        # Autoregressively decode.
+        for _ in range(max_step):
+            out_logits = self.forward(last_out_idx, use_kv_cache=True)[:, 0, ...]
+            out_logits /= temperature
+            out_prob = F.softmax(out_logits, dim=-1)  # (B, V)
+            last_out_idx = torch.multinomial(out_prob, num_samples=1)
+            all_out_idx.append(last_out_idx)
+
+        out_idx = torch.concat(all_out_idx, dim=-1)
+
+        for tm in self.transformer_layers:
+            tm.clear_cache()
+
+        return out_idx
 
     def configure_optimizers(
         self,
