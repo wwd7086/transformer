@@ -33,9 +33,10 @@ gpt_model.load_state_dict(model_states["model_state_dict"])
 
 # Test autoregressive decoding.
 print("\n Autoregressive Inference:")
-prompt = "Fear yo"
-prompt_idx = torch.tensor(encode(prompt), dtype=torch.int64)[None, ...]
-out_idx = gpt_model.sample(prompt_idx, max_step=1000, temperature=1.0)[0]
-
 print("\n---------")
-print(f"{prompt}{decode(out_idx.tolist())}")
+
+prompt = "Fear yo"
+print(f"\033[31m{prompt}\033[0m", end="")
+prompt_idx = torch.tensor(encode(prompt), dtype=torch.int64)[None, ...]
+for out_idx in gpt_model.sample(prompt_idx, max_step=5000, temperature=1.0):
+    print(decode(out_idx.tolist()[0]), end="")

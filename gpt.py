@@ -1,11 +1,12 @@
+from dataclasses import dataclass
+from typing import Generator
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 import transformer
 from token_emb import TokenEmbedder
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -74,7 +75,7 @@ class TinyGPT(nn.Module):
         prompt: torch.Tensor,
         max_step: int,
         temperature: float = 1.0,
-    ) -> torch.Tensor:
+    ) -> Generator[torch.Tensor, None, None]:
         """Sample the output sequence autoregressivly based on the prompt.
 
         Args:
@@ -85,15 +86,12 @@ class TinyGPT(nn.Module):
         """
         self.eval()
 
-        # TODD: Support temperature based sampling to replace argmax.
-        all_out_idx = []
-
         # Prefill the prompt.
         out_logits = self.forward(prompt, use_kv_cache=True)[:, -1, ...]
         out_logits /= temperature
         out_prob = F.softmax(out_logits, dim=-1)  # (B, V)
         last_out_idx = torch.multinomial(out_prob, num_samples=1)
-        all_out_idx.append(last_out_idx)
+        yield last_out_idx
 
         # Autoregressively decode.
         for _ in range(max_step):
@@ -101,14 +99,10 @@ class TinyGPT(nn.Module):
             out_logits /= temperature
             out_prob = F.softmax(out_logits, dim=-1)  # (B, V)
             last_out_idx = torch.multinomial(out_prob, num_samples=1)
-            all_out_idx.append(last_out_idx)
-
-        out_idx = torch.concat(all_out_idx, dim=-1)
+            yield last_out_idx
 
         for tm in self.transformer_layers:
             tm.clear_cache()
-
-        return out_idx
 
     def configure_optimizers(
         self,
