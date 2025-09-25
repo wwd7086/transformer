@@ -26,7 +26,7 @@ os.makedirs(output_dir, exist_ok=True)
 batch_size = 16
 max_iters = 5000
 warmup_iters = 20  # not super necessary potentially
-lr_decay_iters = 3000  # make equal to max_iters usually
+lr_decay_iters = 5000  # make equal to max_iters usually
 learning_rate = 1e-3  # with baby networks can afford to go a bit higher
 min_lr = 1e-4  # learning_rate / 10 usually
 beta1 = 0.9
@@ -43,6 +43,7 @@ gpt_config = gpt.TinyGPTConfig(
     emb_dim=192,
     num_layers=6,
     num_heads=6,
+    query_group_size=2,
     vocab_size=vocab_size,
     context_length=128,
 )

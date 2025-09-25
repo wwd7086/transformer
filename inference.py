@@ -12,7 +12,7 @@ vocab_size = data.get_vocab_size(meta_path)
 encode, decode = data.get_token_enc_dec(meta_path)
 assert vocab_size is not None
 
-run_name = "20250921_141714"
+run_name = "20250925_013244"
 ckpt_name = "ckpt_4999.pth"
 output_dir = os.path.join("output", run_name, ckpt_name)
 
@@ -21,6 +21,7 @@ gpt_config = gpt.TinyGPTConfig(
     emb_dim=192,
     num_layers=6,
     num_heads=6,
+    query_group_size=2,
     vocab_size=vocab_size,
     context_length=128,
 )

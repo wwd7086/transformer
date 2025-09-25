@@ -14,6 +14,7 @@ class TinyGPTConfig:
     emb_dim: int
     num_layers: int
     num_heads: int
+    query_group_size: int
     vocab_size: int
     context_length: int
 
@@ -35,6 +36,7 @@ class TinyGPT(nn.Module):
                 transformer.Transformer(
                     self.config.emb_dim,
                     self.config.num_heads,
+                    self.config.query_group_size,
                     self.config.context_length,
                 )
                 for _ in range(self.config.num_layers)
@@ -145,6 +147,7 @@ if __name__ == "__main__":
         emb_dim=8,
         num_layers=3,
         num_heads=2,
+        query_group_size=1,
         vocab_size=8,
         context_length=4,
     )

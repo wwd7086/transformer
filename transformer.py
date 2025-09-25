@@ -77,19 +77,28 @@ class MultiHeadAttention(nn.Module):
         self,
         feature_dim: int,
         num_heads: int,
+        query_group_size: int,
         context_length: int,
     ) -> None:
         """
         Args:
             context_length: The max context length.
+            num_heads: Number of query heads.
+            query_group_size: How many query maps to a single kv pair.
         """
         super().__init__()
 
         assert feature_dim % num_heads == 0
+        assert num_heads % query_group_size == 0
 
-        self.num_heads = num_heads
+        self.feature_dim = feature_dim
+        self.query_group_size = query_group_size
         self.context_length = context_length
-        self.head_size = feature_dim // self.num_heads
+
+        self.num_q_heads = num_heads
+        self.num_kv_heads = num_heads // query_group_size
+        self.head_size = feature_dim // self.num_q_heads
+
         self.normalization_factor = 1.0 / math.sqrt(self.head_size)
 
         # Attention mask.
@@ -110,9 +119,12 @@ class MultiHeadAttention(nn.Module):
         self.kv_cache = KVCache(self.context_length)
 
         # MLP layers.
+        # Note: When query_group_size is not equal to 1, multiple querys maps
+        # to same kv, effective reduce the numerber of kv output size.
+        output_dim = feature_dim + 2 * (feature_dim // query_group_size)
         self.attention_proj = nn.Linear(
             feature_dim,
-            feature_dim * 3,
+            output_dim,
             bias=True,
         )
 
@@ -141,10 +153,20 @@ class MultiHeadAttention(nn.Module):
         B, T, C = input.shape
 
         # Apply projection to get q,k,v.
-        qkv: torch.Tensor = self.attention_proj(input)  # (B, T, 3*C)
-        qkv = qkv.reshape(B, T, 3, self.num_heads, self.head_size)  # (B, T, 3, H, Dh)
-        qkv = qkv.transpose(1, 3)  # (B, H, 3, T, Dh)
-        q, k, v = qkv.unbind(dim=2)  # (B, H, T, Dh)
+        qkv: torch.Tensor = self.attention_proj(input)  # (B, T, C + C/g + C/g)
+
+        q = qkv[..., : self.feature_dim]
+        q = q.reshape(
+            B, T, self.query_group_size, self.num_kv_heads, self.head_size
+        )  # (B, T, G, Hkv, Dh)
+        q = q.transpose(1, 3)  # (B, Hkv, G, T, Dh)
+
+        kv = qkv[..., self.feature_dim :]
+        kv = kv.reshape(
+            B, T, 2, self.num_kv_heads, self.head_size
+        )  # (B, T, 2, Hkv, Dh)
+        kv = kv.transpose(1, 3)  # (B, Hkv, 2, T, Dh)
+        k, v = kv.unbind(dim=2)  # (B, Hkv, T, Dh)
 
         if use_kv_cache:
             k, v = self.kv_cache.append(k, v)
@@ -168,19 +190,19 @@ class MultiHeadAttention(nn.Module):
         )
 
         # Apply multi head attention.
-        k_t = k.transpose(2, 3)  # (B, H, Dh, Tk)
-        att = q @ k_t * self.normalization_factor  # (B, H, T, Tk)
+        k_t = k.transpose(2, 3)  # (B, Hkv, Dh, Tk)
+        att = q @ k_t[:, :, None, ...] * self.normalization_factor  # (B, Hkv, G, T, Tk)
         # Apply causal mask
         att = att.masked_fill(
             self.causal_mask[Tc : Tc + T, :Tk],
             float("-inf"),
         )
-        att_prob = F.softmax(att, dim=-1)  # (B, H, T, Tk)
-        att_v: torch.Tensor = att_prob @ v  # (B, H, T, Dh)
+        att_prob = F.softmax(att, dim=-1)  # (B, Hkv, G, T, Tk)
+        att_v: torch.Tensor = att_prob @ v[:, :, None, ...]  # (B, Hkv, G, T, Dh)
 
         # Apply final concat and projection.
-        att_v = att_v.transpose(1, 2)  # (B, T, H, Dh)
-        att_v = att_v.flatten(start_dim=2, end_dim=3)  # (B, T, C)
+        att_v = att_v.transpose(1, 3)  # (B, T, G, Hkv, Dh)
+        att_v = att_v.flatten(start_dim=2, end_dim=4)  # (B, T, C)
         output = self.final_proj(att_v)
 
         return output
@@ -230,6 +252,7 @@ class Transformer(nn.Module):
         self,
         feature_dim: int,
         num_heads: int,
+        query_group_size: int,
         context_length: int,
     ):
         super().__init__()
@@ -237,6 +260,7 @@ class Transformer(nn.Module):
         self.attention = MultiHeadAttention(
             feature_dim,
             num_heads,
+            query_group_size,
             context_length,
         )
         self.feed_forward = FeedForward(feature_dim)
@@ -272,13 +296,15 @@ class Transformer(nn.Module):
         self.attention.clear_cache()
 
 
-# TODO: Support group query
-# TODO: Try out flash attention
-
 if __name__ == "__main__":
-    B, T, C = 2, 8, 16
+    B, T, C = 3, 8, 16
 
-    transformer = Transformer(feature_dim=C, num_heads=2, context_length=2 * T)
+    transformer = Transformer(
+        feature_dim=C,
+        num_heads=8,
+        query_group_size=2,
+        context_length=2 * T,
+    )
 
     # Test simple forward.
     test_input = torch.zeros(B, T, C)
