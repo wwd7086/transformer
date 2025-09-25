@@ -40,6 +40,38 @@ class RMSNorm(nn.Module):
         return scaled_input
 
 
+class KVCache:
+    def __init__(self, cache_size: int) -> None:
+        self.cache_size = cache_size
+        # KV caches.
+        self.k_cache: Optional[torch.Tensor] = None  # (B, H, Tc, Dh)
+        self.v_cache: Optional[torch.Tensor] = None  # (B, H, Tc, Dh)
+
+    def append(
+        self, k: torch.Tensor, v: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        B = k.shape[0]
+        if self.k_cache is None:
+            # Initialize the cache.
+            self.k_cache = k
+            self.v_cache = v
+        else:
+            # Ensure the batch dimension matches.
+            assert self.v_cache is not None
+            assert B == self.k_cache.shape[0]
+            # Append to the cache.
+            self.k_cache = torch.concat((self.k_cache, k), dim=2)
+            self.k_cache = self.k_cache[..., -self.cache_size :, :]
+            self.v_cache = torch.concat((self.v_cache, v), dim=2)
+            self.v_cache = self.v_cache[..., -self.cache_size :, :]
+        return self.k_cache, self.v_cache
+
+    def clear_cache(self) -> None:
+        """Clear the kv cache."""
+        self.k_cache = None
+        self.v_cache = None
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(
         self,
@@ -75,8 +107,7 @@ class MultiHeadAttention(nn.Module):
         self.register_buffer("rot_cos", rot_cos)
 
         # KV caches.
-        self.k_cache: Optional[torch.Tensor] = None  # (B, H, Tc, Dh)
-        self.v_cache: Optional[torch.Tensor] = None  # (B, H, Tc, Dh)
+        self.kv_cache = KVCache(self.context_length)
 
         # MLP layers.
         self.attention_proj = nn.Linear(
@@ -116,21 +147,7 @@ class MultiHeadAttention(nn.Module):
         q, k, v = qkv.unbind(dim=2)  # (B, H, T, Dh)
 
         if use_kv_cache:
-            if self.k_cache is None:
-                # Initialize the cache.
-                self.k_cache = k
-                self.v_cache = v
-            else:
-                # Ensure the batch dimension matches.
-                assert self.v_cache is not None
-                assert B == self.k_cache.shape[0]
-                # Append to the cache.
-                self.k_cache = torch.concat((self.k_cache, k), dim=2)
-                self.k_cache = self.k_cache[..., -self.context_length :, :]
-                self.v_cache = torch.concat((self.v_cache, v), dim=2)
-                self.v_cache = self.v_cache[..., -self.context_length :, :]
-                k = self.k_cache
-                v = self.v_cache
+            k, v = self.kv_cache.append(k, v)
 
         # Note:
         # - T: Is the number of new query keys
@@ -144,7 +161,11 @@ class MultiHeadAttention(nn.Module):
         q = pos_emb.apply_rot_emb(
             q, self.rot_sin[Tc : Tc + T, :], self.rot_cos[Tc : Tc + T, :]
         )
-        k = pos_emb.apply_rot_emb(k, self.rot_sin[:Tk, :], self.rot_cos[:Tk, :])
+        k = pos_emb.apply_rot_emb(
+            k,
+            self.rot_sin[:Tk, :],
+            self.rot_cos[:Tk, :],
+        )
 
         # Apply multi head attention.
         k_t = k.transpose(2, 3)  # (B, H, Dh, Tk)
@@ -166,8 +187,7 @@ class MultiHeadAttention(nn.Module):
 
     def clear_cache(self) -> None:
         """Clear the kv cache."""
-        self.k_cache = None
-        self.v_cache = None
+        self.kv_cache.clear_cache()
 
 
 class SwiGLU(nn.Module):
