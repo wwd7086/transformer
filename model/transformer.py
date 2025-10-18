@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-import pos_emb
+import model.pos_emb as pos_emb
 
 # Convention for tensor dimensions.
 # B - Batch

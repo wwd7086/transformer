@@ -2,8 +2,8 @@ import os
 
 import torch
 
-import gpt
-import data
+import model.gpt as gpt
+import dataset.shakespeare_char.data as data
 
 dataset_name = "shakespeare_char"
 data_dir = os.path.join("dataset", dataset_name)

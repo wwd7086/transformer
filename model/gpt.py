@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import transformer
-from token_emb import TokenEmbedder
+import model.transformer as transformer
+from model.token_emb import TokenEmbedder
 
 
 @dataclass

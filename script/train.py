@@ -5,9 +5,9 @@ from datetime import datetime
 
 import torch
 
-import data
-import gpt
-import loss
+import dataset.shakespeare_char.data as data
+import model.gpt as gpt
+import model.loss as loss
 
 # Dataset
 dataset_name = "shakespeare_char"
