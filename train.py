@@ -32,7 +32,7 @@ min_lr = 1e-4  # learning_rate / 10 usually
 beta1 = 0.9
 beta2 = 0.99  # make a bit bigger because number of tokens per iter is small
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
-weight_decay = 1e-2
+weight_decay = 3e-2
 
 print_interval = 50
 save_interval = 500
@@ -40,12 +40,12 @@ eval_interval = 500
 eval_iters = 200
 
 gpt_config = gpt.TinyGPTConfig(
-    emb_dim=192,
+    emb_dim=256,
     num_layers=6,
-    num_heads=6,
+    num_heads=8,
     query_group_size=2,
     vocab_size=vocab_size,
-    context_length=128,
+    context_length=256,
 )
 
 # Initialize the model.

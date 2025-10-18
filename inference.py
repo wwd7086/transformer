@@ -12,18 +12,18 @@ vocab_size = data.get_vocab_size(meta_path)
 encode, decode = data.get_token_enc_dec(meta_path)
 assert vocab_size is not None
 
-run_name = "20250925_013244"
+run_name = "20250925_014945"
 ckpt_name = "ckpt_4999.pth"
 output_dir = os.path.join("output", run_name, ckpt_name)
 
 # Initialize the model.
 gpt_config = gpt.TinyGPTConfig(
-    emb_dim=192,
+    emb_dim=256,
     num_layers=6,
-    num_heads=6,
+    num_heads=8,
     query_group_size=2,
     vocab_size=vocab_size,
-    context_length=128,
+    context_length=256,
 )
 gpt_model = gpt.TinyGPT(gpt_config)
 gpt_model.eval()
@@ -36,7 +36,7 @@ gpt_model.load_state_dict(model_states["model_state_dict"])
 print("\n Autoregressive Inference:")
 print("\n---------")
 
-prompt = "Fear yo"
+prompt = input("prompt:")
 print(f"\033[31m{prompt}\033[0m", end="")
 prompt_idx = torch.tensor(encode(prompt), dtype=torch.int64)[None, ...]
 for out_idx in gpt_model.sample(prompt_idx, max_step=5000, temperature=1.0):
