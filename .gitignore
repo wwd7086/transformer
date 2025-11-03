@@ -6,6 +6,11 @@ dist/
 wheels/
 *.egg-info
 
+# Ignore all .npy and .gz files
+*.npy
+*.npz
+*.gz
+
 # Virtual environments
 .venv
 

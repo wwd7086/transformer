@@ -24,7 +24,7 @@ class RMSNorm(nn.Module):
         self.scale = nn.Parameter(torch.ones(feature_dim))
         self.epsilon = 1e-8
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, *args) -> torch.Tensor:
         """Run forward
 
         Args:
@@ -37,6 +37,45 @@ class RMSNorm(nn.Module):
         rms = input.pow(2).mean(dim=-1, keepdim=True).sqrt()  # (B, T, 1)
         norm_input = input / (rms + self.epsilon)
         scaled_input = norm_input * self.scale
+        return scaled_input
+
+
+class AdaRMSNorm(nn.Module):
+    def __init__(
+        self,
+        feature_dim: int,
+        cond_dim: int,
+    ):
+        super().__init__()
+
+        self.scale = nn.Parameter(torch.ones(feature_dim))
+        self.epsilon = 1e-8
+
+        self.cond_proj = nn.Linear(cond_dim, feature_dim, bias=False)
+        self.cond_proj.weight.data.zero_()
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        condition: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run forward
+
+        Args:
+            input: with shape (B, T, C)
+            condition: with shape (B, Cc)
+
+        Returns:
+            Output with shape (B, T, C)
+        """
+
+        # Normalize input.
+        rms = input.pow(2).mean(dim=-1, keepdim=True).sqrt()  # (B, T, 1)
+        norm_input = input / (rms + self.epsilon)
+        # Apply conditioning.
+        condition = F.silu(condition)
+        cond_scale = self.cond_proj(condition).unsqueeze(1)  # (B, 1, C)
+        scaled_input = norm_input * (self.scale + cond_scale)
         return scaled_input
 
 
@@ -254,6 +293,7 @@ class Transformer(nn.Module):
         num_heads: int,
         query_group_size: int,
         context_length: int,
+        use_ada_rmsnorm: bool = False,
     ):
         super().__init__()
 
@@ -264,30 +304,37 @@ class Transformer(nn.Module):
             context_length,
         )
         self.feed_forward = FeedForward(feature_dim)
-        self.att_norm = RMSNorm(feature_dim)
-        self.ff_norm = RMSNorm(feature_dim)
+
+        if use_ada_rmsnorm:
+            self.att_norm = AdaRMSNorm(feature_dim, feature_dim)
+            self.ff_norm = AdaRMSNorm(feature_dim, feature_dim)
+        else:
+            self.att_norm = RMSNorm(feature_dim)
+            self.ff_norm = RMSNorm(feature_dim)
 
     def forward(
         self,
         input: torch.Tensor,
+        condition: Optional[torch.Tensor] = None,
         use_kv_cache: bool = False,
     ) -> torch.Tensor:
         """Run forward
 
         Args:
             input: with shape (B, T, C)
+            condition: with shape (B, Cc) or None
 
         Returns:
             Output with shape (B, T, C)
         """
 
         att_out = self.attention(
-            self.att_norm(input),
+            self.att_norm(input, condition),
             use_kv_cache,
         )
         att_out += input
 
-        ff_out = self.feed_forward(self.ff_norm(att_out))
+        ff_out = self.feed_forward(self.ff_norm(att_out, condition))
         ff_out += att_out
 
         return ff_out

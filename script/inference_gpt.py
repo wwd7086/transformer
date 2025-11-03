@@ -14,7 +14,7 @@ assert vocab_size is not None
 
 run_name = "20250925_014945"
 ckpt_name = "ckpt_4999.pth"
-output_dir = os.path.join("output", run_name, ckpt_name)
+output_dir = os.path.join("output", "gpt", run_name, ckpt_name)
 
 # Initialize the model.
 gpt_config = gpt.TinyGPTConfig(

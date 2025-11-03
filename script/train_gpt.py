@@ -19,7 +19,7 @@ assert vocab_size is not None
 # Output
 now = datetime.now()
 run_name = now.strftime("%Y%m%d_%H%M%S")
-output_dir = os.path.join("output", run_name)
+output_dir = os.path.join("output", "gpt", run_name)
 os.makedirs(output_dir, exist_ok=True)
 
 # Hyperparameters
@@ -146,7 +146,7 @@ def train_loop():
         if iter % eval_interval == 0 or iter == max_iters - 1:
             losses = estimate_loss()
             print(
-                f"Step: {iter}, train loss {losses["train"]:.4f}, val loss {losses["val"]:.4f}"
+                f"Step: {iter}, train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
             )
 
 
