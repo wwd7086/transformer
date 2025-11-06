@@ -1,5 +1,4 @@
 import os
-import math
 from dataclasses import asdict
 from datetime import datetime
 
@@ -10,6 +9,14 @@ import dataset.mnist.data as data
 import model.dit as dit
 from model.diffusion_schedule import get_diffusion_schedule
 from model.diffusion import ForwardDiffuser, preprocess_image
+
+# TODO:
+# 1. Add class conditioning
+# 2. Add consine based diffusion schedule
+# 3. Add predicted variance to the model
+# 4. Implement full AdaZero layer norm
+# 5. The last layer norm also need to be adaptive
+# 6. Add moving average model weights
 
 # Dataset
 dataset_name = "mnist"
@@ -22,21 +29,16 @@ output_dir = os.path.join("output", "dit", run_name)
 os.makedirs(output_dir, exist_ok=True)
 
 # Hyperparameters
-batch_size = 16
+batch_size = 32
 max_iters = 5000
-warmup_iters = 20  # not super necessary potentially
-lr_decay_iters = 5000  # make equal to max_iters usually
-learning_rate = 1e-3  # with baby networks can afford to go a bit higher
-min_lr = 1e-4  # learning_rate / 10 usually
+learning_rate = 1e-4
 beta1 = 0.9
-beta2 = 0.99  # make a bit bigger because number of tokens per iter is small
-grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
-weight_decay = 3e-2
+beta2 = 0.99
+grad_clip = 1.0
+weight_decay = 0.0
 
 print_interval = 50
 save_interval = 500
-eval_interval = 500
-eval_iters = 200
 
 num_diffusion_steps = 1000
 beta_start = 0.0001
@@ -45,15 +47,15 @@ beta_end = 0.02
 dit_config = dit.TinyDiTConfig(
     image_dim=28,
     patch_size=4,
-    emb_dim=128,
+    emb_dim=256,
     output_dim=1,
     num_layers=6,
-    num_heads=4,
+    num_heads=8,
     query_group_size=1,
     context_length=49,
     time_max_period=num_diffusion_steps,
     time_num_thetas=32,
-    time_output_dim=128,
+    time_output_dim=256,
 )
 
 # Initialize the model.
@@ -63,29 +65,6 @@ diffusion_schedule = get_diffusion_schedule(
     timesteps=num_diffusion_steps, beta_start=beta_start, beta_end=beta_end
 )
 forward_diffuser = ForwardDiffuser(diffusion_schedule)
-
-
-# Initialize the LR schedule.
-def get_lr(it: int) -> float:
-    # 1) linear warmup for warmup_iters steps
-    if it < warmup_iters:
-        return learning_rate * (it + 1) / (warmup_iters + 1)
-    # 2) if it > lr_decay_iters, return min learning rate
-    if it > lr_decay_iters:
-        return min_lr
-    # 3) in between, use cosine decay down to min learning rate
-    decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
-    assert 0 <= decay_ratio <= 1
-    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
-    return min_lr + coeff * (learning_rate - min_lr)
-
-
-@torch.no_grad()
-def estimate_loss() -> dict:
-    out = {"train": 0.0, "val": 0.0}
-    dit_model.eval()
-    dit_model.train()
-    return out
 
 
 # Intialize the optimizer.
@@ -98,16 +77,12 @@ optimizer = dit_model.configure_optimizers(
 
 def train_loop():
     for iter in range(max_iters):
-        # Set learning rate.
-        lr = get_lr(iter)
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr
-
         # Fetch data.
         x, y = data.get_batch(
             data_dir,
             "train",
             batch_size,
+            filter_label=8,
         )
 
         # Sample noise x.
@@ -146,12 +121,6 @@ def train_loop():
                 os.path.join(output_dir, f"ckpt_{iter}.pth"),
             )
             print(f"Step: {iter}, saved ckpt")
-
-        if iter % eval_interval == 0 or iter == max_iters - 1:
-            losses = estimate_loss()
-            print(
-                f"Step: {iter}, train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
-            )
 
 
 if __name__ == "__main__":

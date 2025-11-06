@@ -71,12 +71,18 @@ class ReverseDiffuser:
             Denoised version of noisy_x at time step t.
         """
 
+        t_tensor = torch.zeros(
+            (x.shape[0],),
+            device=x.device,
+            dtype=torch.long,
+        )
+
         for t in range(self.schedule.num_steps - 1, -1, -1):
             alpha_t = self.schedule.alphas[t]
             alpha_cum_t = self.schedule.alphas_cumprod[t]
             beta_t = self.schedule.betas[t]
+            t_tensor.fill_(t)
 
-            t_tensor = torch.full((x.shape[0],), t, device=x.device, dtype=torch.long)
             pred_noise = self.model(x, t_tensor)[..., 0]
             x = (
                 x - (1 - alpha_t) / torch.sqrt(1 - alpha_cum_t) * pred_noise

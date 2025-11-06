@@ -118,12 +118,15 @@ class MultiHeadAttention(nn.Module):
         num_heads: int,
         query_group_size: int,
         context_length: int,
+        enable_causal_mask: bool,
     ) -> None:
         """
         Args:
             context_length: The max context length.
             num_heads: Number of query heads.
             query_group_size: How many query maps to a single kv pair.
+            context_length: The max context length.
+            enable_causal_mask: Whether to apply causal mask.
         """
         super().__init__()
 
@@ -133,6 +136,7 @@ class MultiHeadAttention(nn.Module):
         self.feature_dim = feature_dim
         self.query_group_size = query_group_size
         self.context_length = context_length
+        self.enable_causal_mask = enable_causal_mask
 
         self.num_q_heads = num_heads
         self.num_kv_heads = num_heads // query_group_size
@@ -232,10 +236,11 @@ class MultiHeadAttention(nn.Module):
         k_t = k.transpose(2, 3)  # (B, Hkv, Dh, Tk)
         att = q @ k_t[:, :, None, ...] * self.normalization_factor  # (B, Hkv, G, T, Tk)
         # Apply causal mask
-        att = att.masked_fill(
-            self.causal_mask[Tc : Tc + T, :Tk],
-            float("-inf"),
-        )
+        if self.enable_causal_mask:
+            att = att.masked_fill(
+                self.causal_mask[Tc : Tc + T, :Tk],
+                float("-inf"),
+            )
         att_prob = F.softmax(att, dim=-1)  # (B, Hkv, G, T, Tk)
         att_v: torch.Tensor = att_prob @ v[:, :, None, ...]  # (B, Hkv, G, T, Dh)
 
@@ -294,6 +299,7 @@ class Transformer(nn.Module):
         query_group_size: int,
         context_length: int,
         use_ada_rmsnorm: bool = False,
+        enable_causal_mask: bool = True,
     ):
         super().__init__()
 
@@ -302,6 +308,7 @@ class Transformer(nn.Module):
             num_heads,
             query_group_size,
             context_length,
+            enable_causal_mask,
         )
         self.feed_forward = FeedForward(feature_dim)
 

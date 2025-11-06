@@ -159,6 +159,7 @@ class TinyDiT(nn.Module):
                     self.config.query_group_size,
                     self.config.context_length,
                     use_ada_rmsnorm=True,
+                    enable_causal_mask=False,
                 )
                 for _ in range(self.config.num_layers)
             ]
@@ -228,7 +229,8 @@ if __name__ == "__main__":
     image_encoder = ImageEncoder(patch_size=4, emb_dim=128)
     dummy_img = torch.randn(2, 28, 28)  # (B, H, W)
     enc_out = image_encoder(dummy_img)
-    print(f"Image encoder output shape: {enc_out.shape}")  # Expected: (2, T, 256)
+    print(f"Image encoder output shape: {enc_out.shape}")
+    assert enc_out.shape == (2, 49, 128)
 
     # Test the time encoder.
     time_encoder = TimeEncoder(
@@ -238,7 +240,8 @@ if __name__ == "__main__":
     )
     dummy_t = torch.randint(0, 1000, (2,))  # (B,)
     time_out = time_encoder(dummy_t)
-    print(f"Time encoder output shape: {time_out.shape}")  # Expected: (2, 128)
+    print(f"Time encoder output shape: {time_out.shape}")
+    assert time_out.shape == (2, 128)
 
     # Test the TinyDiT model.
     config = TinyDiTConfig(
@@ -258,4 +261,5 @@ if __name__ == "__main__":
     print(model)
 
     test_out = model(dummy_img, dummy_t)
-    print(f"TinyDiT output shape: {test_out.shape}")  # Expected: (2, 28, 28, 2)
+    print(f"TinyDiT output shape: {test_out.shape}")
+    assert test_out.shape == (2, 28, 28, 2)

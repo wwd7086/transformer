@@ -10,7 +10,7 @@ from model.diffusion_schedule import get_diffusion_schedule
 dataset_name = "mnist"
 data_dir = os.path.join("dataset", dataset_name)
 
-run_name = "20251102_194433"
+run_name = "20251104_024138"
 ckpt_name = "ckpt_4999.pth"
 output_dir = os.path.join("output", "dit", run_name, ckpt_name)
 
@@ -22,15 +22,15 @@ beta_end = 0.02
 dit_config = dit.TinyDiTConfig(
     image_dim=28,
     patch_size=4,
-    emb_dim=128,
+    emb_dim=256,
     output_dim=1,
     num_layers=6,
-    num_heads=4,
+    num_heads=8,
     query_group_size=1,
     context_length=49,
     time_max_period=num_diffusion_steps,
     time_num_thetas=32,
-    time_output_dim=128,
+    time_output_dim=256,
 )
 
 dit_model = dit.TinyDiT(dit_config)
