@@ -63,7 +63,7 @@ class TinyGPT(nn.Module):
 
         # Apply multiple layers of transformer
         for transformer_layer in self.transformer_layers:
-            x_emb = transformer_layer(x_emb, use_kv_cache)
+            x_emb = transformer_layer(x_emb, use_kv_cache=use_kv_cache)
 
         # Decode the ouput
         x_emb = self.final_norm(x_emb)
