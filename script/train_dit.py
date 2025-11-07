@@ -17,6 +17,8 @@ from model.diffusion import ForwardDiffuser, preprocess_image
 # 4. Implement full AdaZero layer norm
 # 5. The last layer norm also need to be adaptive
 # 6. Add moving average model weights
+# 7. (Not working) use beta distribution for time embedding
+# 8. Add 2D position encoding for image patches
 
 # Dataset
 dataset_name = "mnist"
@@ -29,7 +31,7 @@ output_dir = os.path.join("output", "dit", run_name)
 os.makedirs(output_dir, exist_ok=True)
 
 # Hyperparameters
-batch_size = 32
+batch_size = 64
 max_iters = 5000
 learning_rate = 1e-4
 beta1 = 0.9

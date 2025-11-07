@@ -1,8 +1,5 @@
 # Implementation of the diffusion image transformer
 
-# Using mnist digit dataset
-# Using transformer backbone
-# VAE endcoder and decoder
 from dataclasses import dataclass
 
 import torch
@@ -160,6 +157,7 @@ class TinyDiT(nn.Module):
                     self.config.context_length,
                     use_ada_rmsnorm=True,
                     enable_causal_mask=False,
+                    max_pos_emb_period=100,
                 )
                 for _ in range(self.config.num_layers)
             ]

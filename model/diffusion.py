@@ -87,5 +87,7 @@ class ReverseDiffuser:
             x = (
                 x - (1 - alpha_t) / torch.sqrt(1 - alpha_cum_t) * pred_noise
             ) / torch.sqrt(alpha_t)
-            x += torch.sqrt(beta_t) * torch.randn_like(x)
+            # Note: add noise except for the last step
+            if t > 0:
+                x += torch.sqrt(beta_t) * torch.randn_like(x)
             yield x

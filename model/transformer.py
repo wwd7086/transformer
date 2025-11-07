@@ -119,6 +119,7 @@ class MultiHeadAttention(nn.Module):
         query_group_size: int,
         context_length: int,
         enable_causal_mask: bool,
+        max_pos_emb_period: float,
     ) -> None:
         """
         Args:
@@ -127,6 +128,7 @@ class MultiHeadAttention(nn.Module):
             query_group_size: How many query maps to a single kv pair.
             context_length: The max context length.
             enable_causal_mask: Whether to apply causal mask.
+            max_pos_emb_period: Maximum period for rotary position embedding.
         """
         super().__init__()
 
@@ -152,7 +154,10 @@ class MultiHeadAttention(nn.Module):
         self.register_buffer("causal_mask", causal_mask)
 
         # Rotary embedding.
-        rot_thetas = pos_emb.gen_thetas(self.head_size // 2)
+        rot_thetas = pos_emb.gen_thetas(
+            self.head_size // 2,
+            max_pos_emb_period,
+        )
         rot_sin = pos_emb.gen_sin_emb(rot_thetas, context_length)
         rot_cos = pos_emb.gen_cos_emb(rot_thetas, context_length)
         self.register_buffer("rot_sin", rot_sin)
@@ -300,6 +305,7 @@ class Transformer(nn.Module):
         context_length: int,
         use_ada_rmsnorm: bool = False,
         enable_causal_mask: bool = True,
+        max_pos_emb_period: float = 10000,
     ):
         super().__init__()
 
@@ -309,6 +315,7 @@ class Transformer(nn.Module):
             query_group_size,
             context_length,
             enable_causal_mask,
+            max_pos_emb_period,
         )
         self.feed_forward = FeedForward(feature_dim)
 
