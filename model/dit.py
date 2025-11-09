@@ -148,6 +148,10 @@ class TinyDiT(nn.Module):
             self.config.time_output_dim,
         )
 
+        self.pos_emb = nn.Parameter(
+            torch.zeros(1, self.config.context_length, self.config.emb_dim)
+        )
+
         self.transformer_layers = nn.ModuleList(
             [
                 transformer.Transformer(
@@ -176,6 +180,7 @@ class TinyDiT(nn.Module):
         """
 
         x = self.encoder(x)  # (B, T, C)
+        x = x + self.pos_emb  # (B, T, C)
         t_emb = self.time_encoder(t)  # (B, Ct)
 
         for layer in self.transformer_layers:
