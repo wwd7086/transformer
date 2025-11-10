@@ -47,8 +47,6 @@ class AdaRMSNorm(nn.Module):
         cond_dim: int,
     ):
         super().__init__()
-
-        self.scale = nn.Parameter(torch.ones(feature_dim))
         self.epsilon = 1e-8
 
         self.cond_proj = nn.Linear(cond_dim, feature_dim, bias=False)
@@ -75,8 +73,40 @@ class AdaRMSNorm(nn.Module):
         # Apply conditioning.
         condition = F.silu(condition)
         cond_scale = self.cond_proj(condition).unsqueeze(1)  # (B, 1, C)
-        scaled_input = norm_input * (self.scale + cond_scale)
+        scaled_input = norm_input * (1.0 + cond_scale)
         return scaled_input
+
+
+class AdaScale(nn.Module):
+    def __init__(
+        self,
+        feature_dim: int,
+        cond_dim: int,
+    ):
+        super().__init__()
+
+        self.cond_proj = nn.Linear(cond_dim, feature_dim, bias=False)
+        self.cond_proj.weight.data.zero_()
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        condition: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run forward
+
+        Args:
+            input: with shape (B, T, C)
+            condition: with shape (B, Cc)
+
+        Returns:
+            Output with shape (B, T, C)
+        """
+
+        # Apply conditioning.
+        condition = F.silu(condition)
+        cond_scale = self.cond_proj(condition).unsqueeze(1)  # (B, 1, C)
+        return input * cond_scale
 
 
 class KVCache:
@@ -318,9 +348,13 @@ class Transformer(nn.Module):
         )
         self.feed_forward = FeedForward(feature_dim)
 
+        self.att_scale: Optional[AdaScale] = None
+        self.ff_scale: Optional[AdaScale] = None
         if use_ada_rmsnorm:
             self.att_norm = AdaRMSNorm(feature_dim, feature_dim)
             self.ff_norm = AdaRMSNorm(feature_dim, feature_dim)
+            self.att_scale = AdaScale(feature_dim, feature_dim)
+            self.ff_scale = AdaScale(feature_dim, feature_dim)
         else:
             self.att_norm = RMSNorm(feature_dim)
             self.ff_norm = RMSNorm(feature_dim)
@@ -345,9 +379,13 @@ class Transformer(nn.Module):
             self.att_norm(input, condition),
             use_kv_cache,
         )
+        if self.att_scale is not None:
+            att_out = self.att_scale(att_out, condition)
         att_out += input
 
         ff_out = self.feed_forward(self.ff_norm(att_out, condition))
+        if self.ff_scale is not None:
+            ff_out = self.ff_scale(ff_out, condition)
         ff_out += att_out
 
         return ff_out

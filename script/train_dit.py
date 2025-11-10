@@ -15,8 +15,6 @@ from model.diffusion import ForwardDiffuser, preprocess_image
 # 1.1 Add classifer free guidance
 # 2. Add consine based diffusion schedule
 # 3. Add predicted variance to the model
-# 4. Implement full AdaZero layer norm
-# 5. The last layer norm also need to be adaptive
 # 6. Add moving average model weights
 # 7. (Not working) use beta distribution for time embedding
 # 9. Finetune the model intilization with reference implementation.

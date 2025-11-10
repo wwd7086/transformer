@@ -170,7 +170,9 @@ class TinyDiT(nn.Module):
             ]
         )
 
-        self.final_norm = transformer.RMSNorm(self.config.emb_dim)
+        self.final_norm = transformer.AdaRMSNorm(
+            self.config.emb_dim, self.config.emb_dim
+        )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
@@ -189,7 +191,7 @@ class TinyDiT(nn.Module):
         for layer in self.transformer_layers:
             x = layer(x, condition=t_emb)  # (B, T, C)
 
-        x = self.final_norm(x)  # (B, T, C)
+        x = self.final_norm(x, condition=t_emb)  # (B, T, C)
         x = self.decoder(x)  # (B, H, W, 2)
 
         return x

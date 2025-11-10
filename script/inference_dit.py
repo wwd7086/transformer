@@ -10,7 +10,7 @@ from model.diffusion_schedule import get_diffusion_schedule
 dataset_name = "mnist"
 data_dir = os.path.join("dataset", dataset_name)
 
-run_name = "20251109_144345"
+run_name = "20251110_021119"
 ckpt_name = "ckpt_4999.pth"
 output_dir = os.path.join("output", "dit", run_name, ckpt_name)
 
