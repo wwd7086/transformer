@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 import model.transformer as transformer
-from model.pos_emb import gen_thetas
+from model.pos_emb import gen_thetas, gen_sin_cos_emb, gen_2d_sin_cos_emb
 
 
 class ImageEncoder(nn.Module):
@@ -100,9 +100,7 @@ class TimeEncoder(nn.Module):
         # Convert t to float.
         t = t.float()
         # Generate sin and cos embeddings.
-        sin_emb = torch.sin(t[:, None] * self.thetas[None, :])
-        cos_emb = torch.cos(t[:, None] * self.thetas[None, :])
-        time_emb = torch.cat([sin_emb, cos_emb], dim=-1)  # (B, 2N)
+        time_emb = gen_sin_cos_emb(self.thetas, t)
         # Apply MLP.
         proj_emb = self.mlp(time_emb)  # (B, C)
         return proj_emb
@@ -148,9 +146,14 @@ class TinyDiT(nn.Module):
             self.config.time_output_dim,
         )
 
-        self.pos_emb = nn.Parameter(
-            torch.zeros(1, self.config.context_length, self.config.emb_dim)
-        )
+        # Fixed positional embedding.
+        fixed_pos_emb = gen_2d_sin_cos_emb(
+            self.config.emb_dim // 4,
+            self.config.image_dim // self.config.patch_size,
+            self.config.image_dim // self.config.patch_size,
+            max_period=100,
+        )  # (T, 4N)
+        self.register_buffer("pos_emb", fixed_pos_emb)  # (T, 4N)
 
         self.transformer_layers = nn.ModuleList(
             [

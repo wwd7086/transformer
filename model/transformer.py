@@ -154,12 +154,11 @@ class MultiHeadAttention(nn.Module):
         self.register_buffer("causal_mask", causal_mask)
 
         # Rotary embedding.
-        rot_thetas = pos_emb.gen_thetas(
+        rot_sin, rot_cos = pos_emb.gen_inter_sin_cos_emb(
             self.head_size // 2,
+            context_length,
             max_pos_emb_period,
         )
-        rot_sin = pos_emb.gen_sin_emb(rot_thetas, context_length)
-        rot_cos = pos_emb.gen_cos_emb(rot_thetas, context_length)
         self.register_buffer("rot_sin", rot_sin)
         self.register_buffer("rot_cos", rot_cos)
 
